@@ -1,4 +1,4 @@
-# app.py - Complete with DeepSeek AI Integration
+# app.py - Complete with Improved DeepSeek AI Prompt Engineering
 import streamlit as st
 import requests
 import json
@@ -17,39 +17,44 @@ st.set_page_config(
 )
 
 class DeepSeekAI:
-    """DeepSeek AI integration for real email analysis"""
+    """DeepSeek AI integration with improved prompt engineering"""
     
     def __init__(self, api_key):
         self.api_key = api_key
         self.base_url = "https://api.deepseek.com/chat/completions"
     
     def analyze_email(self, subject, body):
-        """Analyze email using DeepSeek AI"""
+        """Analyze email using DeepSeek AI with better prompting"""
         if not self.api_key:
             return self._fallback_analysis(subject, body)
         
         try:
             prompt = f"""
-            Analyze this email and provide a JSON response:
+            ANALYZE THIS EMAIL AND CLASSIFY IT ACCURATELY:
 
-            EMAIL SUBJECT: {subject}
-            EMAIL BODY: {body}
+            SUBJECT: {subject}
+            BODY: {body}
 
-            Please analyze and respond with ONLY valid JSON in this exact format:
+            IMPORTANT GUIDELINES:
+            - "worst service", "1/5", "terrible", "angry" = COMPLAINT (High Priority)
+            - "thank you", "great", "excellent", "5/5" = FEEDBACK (Low Priority)  
+            - Questions, "help", "how to" = SERVICE INQUIRY (Medium Priority)
+            - Marketing emails, promotions = PROMOTIONAL (Low Priority)
+            - Security alerts, login issues = SECURITY ALERT (High Priority)
+            - Order issues, shipping problems = ORDER ISSUE (High Priority)
+            - Billing, payments, invoices = BILLING ISSUE (High Priority)
+
+            RESPOND WITH THIS EXACT JSON FORMAT:
             {{
-                "category": "Complaint/Feedback/Service Inquiry/Technical Support/Refund Request/Order Issue/Billing Issue/Security Alert/Account Issue/Product Inquiry/Other",
+                "category": "Complaint/Feedback/Service Inquiry/Promotional/Security Alert/Order Issue/Billing Issue/Other",
                 "priority": "High/Medium/Low",
                 "sentiment": "Positive/Negative/Neutral/Urgent",
                 "confidence": 0.95,
-                "reasoning": "Brief explanation of your analysis",
-                "suggested_reply": "Professional response to send to the customer"
+                "reasoning": "Brief explanation based on email content",
+                "suggested_reply": "Professional, context-appropriate response"
             }}
 
-            Rules:
-            - Complaint: Customer is unhappy, angry, frustrated, wants refund
-            - Feedback: Positive comments, thanks, appreciation
-            - Service Inquiry: General questions, help requests
-            - Be accurate based on the actual email content
+            BE VERY ACCURATE: If the customer is unhappy, angry, or complaining, it's a COMPLAINT.
             """
 
             headers = {
@@ -75,32 +80,56 @@ class DeepSeekAI:
                 content = content.replace('```json', '').replace('```', '').strip()
                 
                 try:
-                    return json.loads(content)
+                    result = json.loads(content)
+                    # Validate the result
+                    if self._validate_ai_result(result, subject, body):
+                        return result
+                    else:
+                        return self._improved_fallback(subject, body)
                 except json.JSONDecodeError:
-                    # If JSON parsing fails, use fallback
                     return self._parse_ai_response(content, subject, body)
             else:
                 st.error(f"DeepSeek API error: {response.status_code}")
-                return self._fallback_analysis(subject, body)
+                return self._improved_fallback(subject, body)
                 
         except Exception as e:
             st.error(f"AI analysis failed: {str(e)}")
-            return self._fallback_analysis(subject, body)
+            return self._improved_fallback(subject, body)
+    
+    def _validate_ai_result(self, result, subject, body):
+        """Validate AI result makes sense"""
+        if not all(key in result for key in ['category', 'priority', 'sentiment', 'confidence', 'reasoning', 'suggested_reply']):
+            return False
+        
+        # Check if category and sentiment match the content
+        text = (subject + " " + body).lower()
+        
+        # If text contains complaint words but AI says positive sentiment, it's wrong
+        complaint_words = ['worst', 'terrible', 'awful', 'bad', '1/5', 'hate', 'angry', 'frustrated']
+        if any(word in text for word in complaint_words) and result.get('sentiment') == 'Positive':
+            return False
+            
+        return True
     
     def _parse_ai_response(self, text, subject, body):
         """Parse AI text response when JSON fails"""
-        # Extract category from AI response
         text_lower = text.lower()
+        email_text = (subject + " " + body).lower()
         
-        if any(word in text_lower for word in ['complaint', 'angry', 'frustrated', 'worst', 'terrible', 'refund']):
+        # Improved logic based on actual content
+        if any(word in email_text for word in ['worst', 'terrible', 'awful', '1/5', 'one star', 'hate', 'angry', 'refund']):
             category = "Complaint"
             priority = "High"
             sentiment = "Negative"
-        elif any(word in text_lower for word in ['feedback', 'positive', 'thank', 'good', 'great', 'excellent']):
+        elif any(word in email_text for word in ['thank', 'great', 'good', 'excellent', '5/5', 'love', 'awesome']):
             category = "Feedback"
             priority = "Low"
             sentiment = "Positive"
-        elif any(word in text_lower for word in ['inquiry', 'question', 'help', 'information']):
+        elif any(word in email_text for word in ['sale', 'deal', 'offer', 'discount', 'buy now', 'shop']):
+            category = "Promotional"
+            priority = "Low"
+            sentiment = "Neutral"
+        elif any(word in email_text for word in ['question', 'help', 'how to', 'information']):
             category = "Service Inquiry"
             priority = "Medium"
             sentiment = "Neutral"
@@ -115,28 +144,39 @@ class DeepSeekAI:
             "sentiment": sentiment,
             "confidence": 0.85,
             "reasoning": f"AI Analysis: {text[:150]}...",
-            "suggested_reply": self._generate_smart_reply(category, subject, body)
+            "suggested_reply": self._generate_context_reply(category, subject, body, sentiment)
         }
     
-    def _fallback_analysis(self, subject, body):
-        """Fallback analysis when AI fails"""
+    def _improved_fallback(self, subject, body):
+        """Improved fallback analysis"""
         full_text = (subject + " " + body).lower()
         
-        if any(word in full_text for word in ['worst', 'terrible', 'awful', '1/5', 'one star', 'refund', 'angry']):
+        # More accurate fallback logic
+        if any(word in full_text for word in ['worst', 'terrible', 'awful', '1/5', 'one star', 'refund', 'angry', 'hate', 'frustrated']):
             category = "Complaint"
             priority = "High"
             sentiment = "Negative"
-            reasoning = "Customer expressed strong dissatisfaction"
-        elif any(word in full_text for word in ['thank', 'great', 'good', 'excellent', 'awesome']):
+            reasoning = "Customer expressed strong dissatisfaction and anger"
+        elif any(word in full_text for word in ['thank', 'great', 'good', 'excellent', '5/5', 'love', 'awesome', 'amazing']):
             category = "Feedback"
             priority = "Low"
             sentiment = "Positive"
-            reasoning = "Positive feedback detected"
-        elif any(word in full_text for word in ['hello', 'hi', 'help', 'information', 'question']):
+            reasoning = "Positive feedback and appreciation detected"
+        elif any(word in full_text for word in ['sale', 'deal', 'offer', 'discount', 'buy', 'shop', 'promotion']):
+            category = "Promotional"
+            priority = "Low"
+            sentiment = "Neutral"
+            reasoning = "Marketing or promotional content"
+        elif any(word in full_text for word in ['question', 'help', 'how to', 'information', 'support']):
             category = "Service Inquiry"
             priority = "Medium"
             sentiment = "Neutral"
-            reasoning = "General inquiry detected"
+            reasoning = "General service inquiry detected"
+        elif any(word in full_text for word in ['security', 'login', 'password', 'hack']):
+            category = "Security Alert"
+            priority = "High"
+            sentiment = "Urgent"
+            reasoning = "Security-related content detected"
         else:
             category = "Other"
             priority = "Low"
@@ -147,36 +187,70 @@ class DeepSeekAI:
             "category": category,
             "priority": priority,
             "sentiment": sentiment,
-            "confidence": 0.75,
+            "confidence": 0.80,
             "reasoning": reasoning,
-            "suggested_reply": self._generate_smart_reply(category, subject, body)
+            "suggested_reply": self._generate_context_reply(category, subject, body, sentiment)
         }
     
-    def _generate_smart_reply(self, category, subject, body):
+    def _generate_context_reply(self, category, subject, body, sentiment):
         """Generate context-aware professional replies"""
+        full_text = (subject + " " + body).lower()
+        
         if category == "Complaint":
-            return f"""Dear Customer,
+            if 'refund' in full_text:
+                return f"""Dear Customer,
 
-We sincerely apologize for the disappointing experience you've had with: "{subject}".
+We sincerely apologize for the terrible experience you've had. We take your feedback very seriously.
 
-This is completely unacceptable and we take full responsibility. Our senior support team has been notified and will contact you within 1 hour to resolve this matter immediately.
+Our refund team has been notified and will process your refund request within 24 hours. You will receive confirmation email once completed.
 
-We are committed to making this right and restoring your confidence in our service.
+We deeply regret the inconvenience caused and are taking immediate steps to improve our service.
 
 Sincerely,
 Customer Relations Manager"""
+            else:
+                return f"""Dear Customer,
+
+We are truly sorry to hear about your disappointing experience with: "{subject}".
+
+This is completely unacceptable. Our senior support team has been escalated and will contact you within 1 hour to resolve this urgently.
+
+We are committed to making this right immediately.
+
+Sincerely,
+Customer Service Director"""
 
         elif category == "Feedback":
-            return f"""Dear Customer,
+            if 'worst' in full_text or '1/5' in full_text:
+                return f"""Dear Customer,
+
+Thank you for your honest feedback about: "{subject}".
+
+We take all feedback seriously, especially when we fall short of expectations. Our quality team is reviewing your comments to implement immediate improvements.
+
+We appreciate you bringing this to our attention.
+
+Best regards,
+Quality Improvement Team"""
+            else:
+                return f"""Dear Customer,
 
 Thank you so much for your wonderful feedback about: "{subject}"!
 
-We're absolutely thrilled to hear about your positive experience! Your kind words have been shared with our entire team - this truly makes our day!
+We're absolutely thrilled to hear about your positive experience! Your kind words have been shared with our entire team.
 
 We look forward to continuing to provide you with outstanding service.
 
 Warmest regards,
 Customer Experience Team"""
+
+        elif category == "Promotional":
+            return f"""Thank you for your interest in our promotions.
+
+This appears to be a marketing email. If you have any questions about our products or services, please don't hesitate to contact our support team.
+
+Best regards,
+Customer Service"""
 
         elif category == "Service Inquiry":
             return f"""Dear Customer,
@@ -184,8 +258,6 @@ Customer Experience Team"""
 Thank you for your inquiry: "{subject}".
 
 We've received your message and our support team will get back to you within 1-2 business hours with the information you need.
-
-In the meantime, feel free to browse our help center for quick answers to common questions.
 
 Best regards,
 Customer Support Team"""
@@ -195,7 +267,7 @@ Customer Support Team"""
 
 Thank you for your message: "{subject}".
 
-We have received your inquiry and our team will review it shortly. We appreciate your patience and will respond as soon as possible.
+We have received your communication and our team will review it shortly.
 
 Best regards,
 Customer Support Team"""
@@ -316,8 +388,6 @@ class EmailClassifierApp:
             st.session_state.inbox_emails = []
         if 'last_refresh' not in st.session_state:
             st.session_state.last_refresh = None
-        if 'processing_email' not in st.session_state:
-            st.session_state.processing_email = None
     
     def render_sidebar(self):
         """Render sidebar controls"""
