@@ -1,4 +1,4 @@
-# app.py - Complete Email Classifier with Real Gmail Inbox
+# app.py - Fixed version with safe button keys
 import streamlit as st
 import requests
 import json
@@ -7,6 +7,7 @@ import plotly.express as px
 from datetime import datetime
 import time
 import base64
+import re
 
 # Page configuration
 st.set_page_config(
@@ -38,14 +39,6 @@ st.markdown("""
     }
     .classified-email {
         border-left: 4px solid #10B981;
-    }
-    .refresh-btn {
-        background: #3B82F6;
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 6px;
-        cursor: pointer;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -132,8 +125,7 @@ class GmailInbox:
                 'body': body or snippet,
                 'snippet': snippet,
                 'date': date,
-                'is_unread': True,
-                'raw_data': message_data  # Keep raw data for processing
+                'is_unread': True
             }
         except:
             return None
@@ -317,13 +309,6 @@ class EmailClassifierApp:
                 else:
                     st.error("Please enter Gmail token first")
             
-            # Auto-refresh option
-            auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
-            if auto_refresh:
-                st.info("Next refresh in 30 seconds...")
-                time.sleep(30)
-                st.rerun()
-            
             # Statistics
             st.subheader("📈 Statistics")
             st.write(f"Unread Emails: {len(st.session_state.inbox_emails)}")
@@ -390,11 +375,11 @@ class EmailClassifierApp:
             st.subheader("Unread Emails")
         
         with col2:
-            if st.button("🔄 Refresh", type="secondary"):
+            if st.button("🔄 Refresh", type="secondary", key="refresh_inbox"):
                 self.fetch_inbox_emails()
         
         with col3:
-            if st.button("🤖 Classify All", type="primary"):
+            if st.button("🤖 Classify All", type="primary", key="classify_all"):
                 self.classify_inbox_emails()
         
         # Display inbox emails
@@ -410,6 +395,9 @@ class EmailClassifierApp:
             classification = next((c for c in st.session_state.classifications if c.get('email_id') == email['id']), None)
             
             email_class = "classified-email" if is_classified else "inbox-email"
+            
+            # Create safe key for button
+            safe_key = f"classify_{i}_{email['id'][:10]}"
             
             st.markdown(f"""
             <div class="email-card {email_class}">
@@ -427,18 +415,22 @@ class EmailClassifierApp:
                 <div style="margin-top: 0.5rem; font-size: 0.9em; color: #666;">
                     {email['snippet']}
                 </div>
-                <div style="margin-top: 0.5rem;">
-                    {f"<span style='font-size: 0.8em; color: #10B981;'>✓ Classified as {classification['priority']} priority</span>" if is_classified else st.button(f"Classify Email {i+1}", key=f"classify_{i}", type="secondary")}
-                </div>
             </div>
             """, unsafe_allow_html=True)
             
-            # Handle classify button click
-            if f"classify_{i}" in st.session_state and st.session_state[f"classify_{i}"]:
-                result = self.instant_classifier.classify_email(email)
-                st.session_state.classifications.append(result)
-                st.success(f"✅ Classified: {result['category']}")
-                st.rerun()
+            # Add classify button below each email (using safe key)
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if not is_classified:
+                    if st.button(f"Classify", key=safe_key, type="secondary"):
+                        result = self.instant_classifier.classify_email(email)
+                        st.session_state.classifications.append(result)
+                        st.success(f"✅ Classified as: {result['category']}")
+                        st.rerun()
+                else:
+                    st.info(f"✓ {classification['priority']} priority")
+            
+            st.markdown("---")
     
     def render_classify_tab(self):
         """Render manual classification tab"""
@@ -470,7 +462,7 @@ Thank you,
 Customer""",
                                     placeholder="Paste email content here...")
         
-        if st.button("⚡ Classify Instantly", type="primary", use_container_width=True):
+        if st.button("⚡ Classify Instantly", type="primary", use_container_width=True, key="manual_classify"):
             if subject and email_body:
                 with st.spinner("⚡ Analyzing email instantly..."):
                     email_data = {
