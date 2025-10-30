@@ -1,4 +1,4 @@
-# app.py - Pure Streamlit Solution (No HTML Errors)
+# app.py - Complete with DeepSeek AI Integration
 import streamlit as st
 import requests
 import json
@@ -15,6 +15,190 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+class DeepSeekAI:
+    """DeepSeek AI integration for real email analysis"""
+    
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "https://api.deepseek.com/chat/completions"
+    
+    def analyze_email(self, subject, body):
+        """Analyze email using DeepSeek AI"""
+        if not self.api_key:
+            return self._fallback_analysis(subject, body)
+        
+        try:
+            prompt = f"""
+            Analyze this email and provide a JSON response:
+
+            EMAIL SUBJECT: {subject}
+            EMAIL BODY: {body}
+
+            Please analyze and respond with ONLY valid JSON in this exact format:
+            {{
+                "category": "Complaint/Feedback/Service Inquiry/Technical Support/Refund Request/Order Issue/Billing Issue/Security Alert/Account Issue/Product Inquiry/Other",
+                "priority": "High/Medium/Low",
+                "sentiment": "Positive/Negative/Neutral/Urgent",
+                "confidence": 0.95,
+                "reasoning": "Brief explanation of your analysis",
+                "suggested_reply": "Professional response to send to the customer"
+            }}
+
+            Rules:
+            - Complaint: Customer is unhappy, angry, frustrated, wants refund
+            - Feedback: Positive comments, thanks, appreciation
+            - Service Inquiry: General questions, help requests
+            - Be accurate based on the actual email content
+            """
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 1000,
+                "stream": False
+            }
+            
+            response = requests.post(self.base_url, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                content = data['choices'][0]['message']['content']
+                
+                # Clean JSON response
+                content = content.replace('```json', '').replace('```', '').strip()
+                
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, use fallback
+                    return self._parse_ai_response(content, subject, body)
+            else:
+                st.error(f"DeepSeek API error: {response.status_code}")
+                return self._fallback_analysis(subject, body)
+                
+        except Exception as e:
+            st.error(f"AI analysis failed: {str(e)}")
+            return self._fallback_analysis(subject, body)
+    
+    def _parse_ai_response(self, text, subject, body):
+        """Parse AI text response when JSON fails"""
+        # Extract category from AI response
+        text_lower = text.lower()
+        
+        if any(word in text_lower for word in ['complaint', 'angry', 'frustrated', 'worst', 'terrible', 'refund']):
+            category = "Complaint"
+            priority = "High"
+            sentiment = "Negative"
+        elif any(word in text_lower for word in ['feedback', 'positive', 'thank', 'good', 'great', 'excellent']):
+            category = "Feedback"
+            priority = "Low"
+            sentiment = "Positive"
+        elif any(word in text_lower for word in ['inquiry', 'question', 'help', 'information']):
+            category = "Service Inquiry"
+            priority = "Medium"
+            sentiment = "Neutral"
+        else:
+            category = "Other"
+            priority = "Low"
+            sentiment = "Neutral"
+        
+        return {
+            "category": category,
+            "priority": priority,
+            "sentiment": sentiment,
+            "confidence": 0.85,
+            "reasoning": f"AI Analysis: {text[:150]}...",
+            "suggested_reply": self._generate_smart_reply(category, subject, body)
+        }
+    
+    def _fallback_analysis(self, subject, body):
+        """Fallback analysis when AI fails"""
+        full_text = (subject + " " + body).lower()
+        
+        if any(word in full_text for word in ['worst', 'terrible', 'awful', '1/5', 'one star', 'refund', 'angry']):
+            category = "Complaint"
+            priority = "High"
+            sentiment = "Negative"
+            reasoning = "Customer expressed strong dissatisfaction"
+        elif any(word in full_text for word in ['thank', 'great', 'good', 'excellent', 'awesome']):
+            category = "Feedback"
+            priority = "Low"
+            sentiment = "Positive"
+            reasoning = "Positive feedback detected"
+        elif any(word in full_text for word in ['hello', 'hi', 'help', 'information', 'question']):
+            category = "Service Inquiry"
+            priority = "Medium"
+            sentiment = "Neutral"
+            reasoning = "General inquiry detected"
+        else:
+            category = "Other"
+            priority = "Low"
+            sentiment = "Neutral"
+            reasoning = "General communication"
+        
+        return {
+            "category": category,
+            "priority": priority,
+            "sentiment": sentiment,
+            "confidence": 0.75,
+            "reasoning": reasoning,
+            "suggested_reply": self._generate_smart_reply(category, subject, body)
+        }
+    
+    def _generate_smart_reply(self, category, subject, body):
+        """Generate context-aware professional replies"""
+        if category == "Complaint":
+            return f"""Dear Customer,
+
+We sincerely apologize for the disappointing experience you've had with: "{subject}".
+
+This is completely unacceptable and we take full responsibility. Our senior support team has been notified and will contact you within 1 hour to resolve this matter immediately.
+
+We are committed to making this right and restoring your confidence in our service.
+
+Sincerely,
+Customer Relations Manager"""
+
+        elif category == "Feedback":
+            return f"""Dear Customer,
+
+Thank you so much for your wonderful feedback about: "{subject}"!
+
+We're absolutely thrilled to hear about your positive experience! Your kind words have been shared with our entire team - this truly makes our day!
+
+We look forward to continuing to provide you with outstanding service.
+
+Warmest regards,
+Customer Experience Team"""
+
+        elif category == "Service Inquiry":
+            return f"""Dear Customer,
+
+Thank you for your inquiry: "{subject}".
+
+We've received your message and our support team will get back to you within 1-2 business hours with the information you need.
+
+In the meantime, feel free to browse our help center for quick answers to common questions.
+
+Best regards,
+Customer Support Team"""
+
+        else:
+            return f"""Dear Customer,
+
+Thank you for your message: "{subject}".
+
+We have received your inquiry and our team will review it shortly. We appreciate your patience and will respond as soon as possible.
+
+Best regards,
+Customer Support Team"""
 
 class GmailInbox:
     """Class to fetch real emails from Gmail inbox"""
@@ -117,130 +301,9 @@ class GmailInbox:
         except:
             return ""
 
-class InstantClassifier:
-    """Instant email classification"""
-    
-    def classify_email(self, email_data: dict):
-        """Instant classification with rules"""
-        subject = email_data.get('subject', 'No Subject')
-        body = email_data.get('body', '')
-        full_text = (subject + " " + body).lower()
-        
-        # Enhanced pattern matching
-        if any(word in full_text for word in ['damaged', 'not working', 'refund', 'broken', 'issue', 'problem', 'frustrated', 'angry', 'terrible']):
-            category = "Complaint"
-            priority = "High"
-            sentiment = "Negative"
-            confidence = 0.95
-            reasoning = "Customer expressed frustration with product/service issue"
-        elif any(word in full_text for word in ['thank', 'great', 'good', 'excellent', 'awesome', 'amazing', 'love', 'perfect']):
-            category = "Feedback"
-            priority = "Low" 
-            sentiment = "Positive"
-            confidence = 0.88
-            reasoning = "Positive feedback and appreciation detected"
-        elif any(word in full_text for word in ['hello', 'hi', 'help', 'information', 'question', 'support', 'query']):
-            category = "Service Inquiry"
-            priority = "Medium"
-            sentiment = "Neutral"
-            confidence = 0.85
-            reasoning = "General service inquiry or question"
-        elif any(word in full_text for word in ['security', 'login', 'password', 'hack', 'suspicious', 'unauthorized']):
-            category = "Security Alert"
-            priority = "High"
-            sentiment = "Urgent"
-            confidence = 0.92
-            reasoning = "Security-related content detected"
-        elif any(word in full_text for word in ['order', 'shipping', 'delivery', 'tracking', 'purchase', 'buy']):
-            category = "Order Issue"
-            priority = "Medium"
-            sentiment = "Neutral"
-            confidence = 0.87
-            reasoning = "Order or purchase-related inquiry"
-        elif any(word in full_text for word in ['bill', 'payment', 'invoice', 'charge', 'billing']):
-            category = "Billing Issue"
-            priority = "High"
-            sentiment = "Negative"
-            confidence = 0.90
-            reasoning = "Billing or payment-related issue"
-        else:
-            category = "Other"
-            priority = "Low"
-            sentiment = "Neutral"
-            confidence = 0.75
-            reasoning = "General communication"
-        
-        # Generate professional reply
-        reply = self._generate_reply(category, subject, sentiment, full_text)
-        
-        return {
-            'subject': subject,
-            'from': email_data.get('from', 'Unknown'),
-            'category': category,
-            'priority': priority,
-            'sentiment': sentiment,
-            'confidence': confidence,
-            'reply': reply,
-            'timestamp': datetime.now().isoformat(),
-            'body_preview': body[:100] + '...' if len(body) > 100 else body,
-            'ai_reasoning': reasoning,
-            'key_issues': ['Instant pattern analysis'],
-            'model_used': 'Instant Classifier ⚡',
-            'email_id': email_data.get('id', ''),
-            'original_date': email_data.get('date', '')
-        }
-    
-    def _generate_reply(self, category: str, subject: str, sentiment: str, content: str):
-        """Generate professional replies"""
-        base_replies = {
-            "Complaint": f"""Dear Customer,
-
-We sincerely apologize for the issue you've experienced with: "{subject}".
-
-Our team takes this very seriously and we're here to help. We've escalated this to our support team who will contact you within the next hour to resolve this matter.
-
-To help us assist you better, please share your order number and any relevant details.
-
-We appreciate your patience and are committed to making this right.
-
-Sincerely,
-Customer Relations Team""",
-
-            "Feedback": f"""Dear Customer,
-
-Thank you so much for your wonderful feedback about: "{subject}"!
-
-We're absolutely thrilled to hear about your positive experience! Your kind words have been shared with our entire team - this truly makes our day!
-
-We look forward to continuing to provide you with outstanding service.
-
-Warmest regards,
-Customer Experience Team""",
-
-            "Service Inquiry": f"""Dear Customer,
-
-Thank you for your inquiry: "{subject}".
-
-We've received your message and our support team will get back to you within 1-2 business hours with the information you need.
-
-In the meantime, feel free to browse our help center for quick answers to common questions.
-
-Best regards,
-Customer Support Team"""
-        }
-        
-        return base_replies.get(category, f"""Dear Customer,
-
-Thank you for your message: "{subject}".
-
-We have received your inquiry and our team will review it shortly. We appreciate your patience and will respond as soon as possible.
-
-Best regards,
-Customer Support Team""")
-
 class EmailClassifierApp:
     def __init__(self):
-        self.instant_classifier = InstantClassifier()
+        self.deepseek_ai = DeepSeekAI(st.secrets.get("DEEPSEEK_API_KEY", ""))
         self.setup_session_state()
     
     def setup_session_state(self):
@@ -253,6 +316,8 @@ class EmailClassifierApp:
             st.session_state.inbox_emails = []
         if 'last_refresh' not in st.session_state:
             st.session_state.last_refresh = None
+        if 'processing_email' not in st.session_state:
+            st.session_state.processing_email = None
     
     def render_sidebar(self):
         """Render sidebar controls"""
@@ -306,25 +371,56 @@ class EmailClassifierApp:
         except Exception as e:
             st.error(f"❌ Failed to fetch emails: {str(e)}")
     
+    def classify_with_ai(self, email):
+        """Classify email using DeepSeek AI"""
+        try:
+            with st.spinner("🧠 AI is analyzing the email..."):
+                # Use DeepSeek AI for real analysis
+                ai_result = self.deepseek_ai.analyze_email(email['subject'], email['body'])
+                
+                result = {
+                    'subject': email['subject'],
+                    'from': email['from'],
+                    'category': ai_result['category'],
+                    'priority': ai_result['priority'],
+                    'sentiment': ai_result['sentiment'],
+                    'confidence': ai_result['confidence'],
+                    'reply': ai_result['suggested_reply'],
+                    'timestamp': datetime.now().isoformat(),
+                    'body_preview': email['body'][:100] + '...' if len(email['body']) > 100 else email['body'],
+                    'ai_reasoning': ai_result['reasoning'],
+                    'key_issues': ['AI analyzed'],
+                    'model_used': 'DeepSeek AI 🤖',
+                    'email_id': email['id'],
+                    'original_date': email['date']
+                }
+                
+                return result
+                
+        except Exception as e:
+            st.error(f"❌ AI classification failed: {str(e)}")
+            return None
+    
     def classify_inbox_emails(self):
-        """Classify all unread inbox emails"""
+        """Classify all unread inbox emails with AI"""
         if not st.session_state.inbox_emails:
             st.warning("No emails to classify. Refresh inbox first.")
             return
         
         try:
-            with st.spinner(f"🤖 Classifying {len(st.session_state.inbox_emails)} emails..."):
+            with st.spinner(f"🤖 AI is analyzing {len(st.session_state.inbox_emails)} emails..."):
                 new_classifications = 0
                 
                 for email in st.session_state.inbox_emails:
                     # Check if email already classified
                     if not any(c.get('email_id') == email['id'] for c in st.session_state.classifications):
-                        result = self.instant_classifier.classify_email(email)
-                        st.session_state.classifications.append(result)
-                        new_classifications += 1
+                        result = self.classify_with_ai(email)
+                        if result:
+                            st.session_state.classifications.append(result)
+                            new_classifications += 1
                 
                 if new_classifications > 0:
-                    st.success(f"✅ Classified {new_classifications} new emails!")
+                    st.success(f"✅ AI classified {new_classifications} new emails!")
                 else:
                     st.info("📝 All emails already classified")
                     
@@ -332,7 +428,7 @@ class EmailClassifierApp:
             st.error(f"❌ Classification failed: {str(e)}")
     
     def render_inbox_tab(self):
-        """Render Gmail inbox tab - PURE Streamlit"""
+        """Render Gmail inbox tab"""
         st.header("📥 Gmail Inbox")
         
         if not st.session_state.gmail_token:
@@ -350,7 +446,7 @@ class EmailClassifierApp:
                 self.fetch_inbox_emails()
         
         with col3:
-            if st.button("🤖 Classify All", type="primary", key="classify_all_main"):
+            if st.button("🤖 Classify All with AI", type="primary", key="classify_all_main"):
                 self.classify_inbox_emails()
         
         # Display inbox emails
@@ -360,7 +456,7 @@ class EmailClassifierApp:
         
         st.write(f"**Found {len(st.session_state.inbox_emails)} unread emails:**")
         
-        # Display each email using pure Streamlit components
+        # Display each email
         for i, email in enumerate(st.session_state.inbox_emails):
             # Check if email is already classified
             is_classified = any(c.get('email_id') == email['id'] for c in st.session_state.classifications)
@@ -383,14 +479,24 @@ class EmailClassifierApp:
                     if is_classified:
                         st.success(f"✅ {classification['category']}")
                         st.write(f"Priority: {classification['priority']}")
+                        st.write(f"Confidence: {classification['confidence']:.0%}")
                     else:
                         st.info("📧 Unread")
                         # Classify button for this specific email
-                        if st.button(f"Classify", key=f"classify_{i}"):
-                            result = self.instant_classifier.classify_email(email)
-                            st.session_state.classifications.append(result)
-                            st.success(f"✅ Classified as: {result['category']}")
-                            st.rerun()
+                        if st.button(f"Analyze with AI", key=f"classify_{i}"):
+                            result = self.classify_with_ai(email)
+                            if result:
+                                st.session_state.classifications.append(result)
+                                st.success(f"✅ Classified as: {result['category']}")
+                                st.rerun()
+                
+                # Show AI reasoning if classified
+                if is_classified:
+                    with st.expander("🤖 AI Analysis Details"):
+                        st.write(f"**Reasoning:** {classification['ai_reasoning']}")
+                        st.write(f"**Sentiment:** {classification['sentiment']}")
+                        st.write(f"**Suggested Reply:**")
+                        st.write(classification['reply'])
                 
                 st.markdown("---")
     
@@ -399,42 +505,34 @@ class EmailClassifierApp:
         st.header("📧 Manual Classification")
         
         # Manual classification form
-        st.subheader("Classify Custom Email")
+        st.subheader("Analyze Custom Email with AI")
         
         col1, col2 = st.columns([1, 1])
         
         with col1:
             subject = st.text_input("Email Subject", 
-                                  value="Order Issue - Damaged Product",
                                   placeholder="Enter email subject...")
             sender = st.text_input("Sender", 
-                                 value="customer@example.com",
                                  placeholder="sender@example.com")
         
         with col2:
             email_body = st.text_area("Email Content", 
                                     height=150,
-                                    value="""Hello,
-
-I'm writing about my recent order #12345. The product arrived damaged and doesn't work properly.
-
-I would like to request a refund or replacement as soon as possible.
-
-Thank you,
-Customer""",
                                     placeholder="Paste email content here...")
         
-        if st.button("⚡ Classify Instantly", type="primary", use_container_width=True, key="manual_classify"):
+        if st.button("🧠 Analyze with DeepSeek AI", type="primary", use_container_width=True, key="manual_classify"):
             if subject and email_body:
-                with st.spinner("⚡ Analyzing email instantly..."):
+                with st.spinner("🧠 DeepSeek AI is analyzing your email..."):
                     email_data = {
                         'subject': subject,
                         'from': sender or 'customer@example.com',
-                        'body': email_body
+                        'body': email_body,
+                        'id': 'manual_' + str(int(time.time()))
                     }
-                    result = self.instant_classifier.classify_email(email_data)
-                    st.session_state.classifications.append(result)
-                    self.display_classification_result(result)
+                    result = self.classify_with_ai(email_data)
+                    if result:
+                        st.session_state.classifications.append(result)
+                        self.display_classification_result(result)
             else:
                 st.warning("Please enter subject and email content")
     
@@ -442,6 +540,8 @@ Customer""",
         """Display classification result"""
         with st.container():
             st.markdown("---")
+            
+            st.success("🎯 AI Analysis Complete!")
             
             col1, col2, col3 = st.columns(3)
             
@@ -452,8 +552,12 @@ Customer""",
             with col3:
                 st.metric("Confidence", f"{result['confidence']:.1%}")
             
+            # AI Reasoning
+            with st.expander("🤔 AI Reasoning", expanded=True):
+                st.write(result['ai_reasoning'])
+            
             # AI Response
-            with st.expander("📋 Suggested Response", expanded=True):
+            with st.expander("📋 AI Suggested Response", expanded=True):
                 st.write(result['reply'])
             
             st.markdown("---")
@@ -480,7 +584,8 @@ Customer""",
             categories = df['category'].nunique()
             st.metric("Categories", categories)
         with col4:
-            st.metric("Success Rate", "100%")
+            ai_count = len([c for c in st.session_state.classifications if 'DeepSeek' in c.get('model_used', '')])
+            st.metric("AI Analyzed", ai_count)
         
         # Charts
         col1, col2 = st.columns(2)
@@ -501,39 +606,43 @@ Customer""",
                 st.plotly_chart(fig, use_container_width=True)
         
         # Recent classifications
-        st.subheader("Recent Classifications")
+        st.subheader("Recent AI Analyses")
         for result in reversed(st.session_state.classifications[-5:]):
             self.display_email_card(result)
     
     def display_email_card(self, result):
-        """Display email classification card using pure Streamlit"""
+        """Display email classification card"""
         with st.container():
             col1, col2 = st.columns([4, 1])
             
             with col1:
                 st.write(f"**{result['subject']}**")
-                st.write(f"From: {result.get('from', 'Unknown')} • ⚡ Instant")
-                st.write(f"Category: {result['category']} • Priority: {result['priority']} • Confidence: {result['confidence']:.1%}")
+                st.write(f"From: {result.get('from', 'Unknown')} • {result.get('model_used', 'Unknown')}")
+                st.write(f"**{result['category']}** • {result['priority']} priority • {result['confidence']:.1%} confidence")
+                
+                with st.expander("View AI Response"):
+                    st.write(result['reply'])
             
             with col2:
-                priority_color = {
-                    "High": "red", 
-                    "Medium": "orange", 
-                    "Low": "green"
-                }
-                st.write(f"**{result['priority']}**")
+                priority_color = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
+                st.write(f"{priority_color.get(result['priority'], '⚪')} {result['priority']}")
             
             st.markdown("---")
     
     def run(self):
         """Main application runner"""
-        st.title("🤖 AI Email Classifier")
+        st.title("🤖 AI Email Classifier with DeepSeek")
+        
+        # Check if DeepSeek API key is available
+        if not st.secrets.get("DEEPSEEK_API_KEY"):
+            st.error("❌ DeepSeek API key not found in secrets. Please add DEEPSEEK_API_KEY to your secrets.toml")
+            return
         
         # Render sidebar
         self.render_sidebar()
         
         # Main content tabs
-        tab1, tab2, tab3 = st.tabs(["📥 Gmail Inbox", "📧 Classify", "📊 Analytics"])
+        tab1, tab2, tab3 = st.tabs(["📥 Gmail Inbox", "📧 Analyze Email", "📊 Analytics"])
         
         with tab1:
             self.render_inbox_tab()
