@@ -1,4 +1,4 @@
-# app.py - Fixed version with safe button keys
+# app.py - Pure Streamlit Solution (No HTML Errors)
 import streamlit as st
 import requests
 import json
@@ -7,7 +7,6 @@ import plotly.express as px
 from datetime import datetime
 import time
 import base64
-import re
 
 # Page configuration
 st.set_page_config(
@@ -16,32 +15,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1E3A8A;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .email-card {
-        border: 1px solid #E5E7EB;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        background: white;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .inbox-email {
-        border-left: 4px solid #3B82F6;
-    }
-    .classified-email {
-        border-left: 4px solid #10B981;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 class GmailInbox:
     """Class to fetch real emails from Gmail inbox"""
@@ -74,7 +47,6 @@ class GmailInbox:
             )
             
             if response.status_code != 200:
-                st.error(f"❌ Failed to fetch emails: {response.status_code}")
                 return []
             
             messages_data = response.json()
@@ -101,7 +73,6 @@ class GmailInbox:
             return emails
             
         except Exception as e:
-            st.error(f"❌ Error fetching emails: {str(e)}")
             return []
     
     def _parse_email(self, message_data):
@@ -361,7 +332,7 @@ class EmailClassifierApp:
             st.error(f"❌ Classification failed: {str(e)}")
     
     def render_inbox_tab(self):
-        """Render Gmail inbox tab"""
+        """Render Gmail inbox tab - PURE Streamlit"""
         st.header("📥 Gmail Inbox")
         
         if not st.session_state.gmail_token:
@@ -375,11 +346,11 @@ class EmailClassifierApp:
             st.subheader("Unread Emails")
         
         with col2:
-            if st.button("🔄 Refresh", type="secondary", key="refresh_inbox"):
+            if st.button("🔄 Refresh", type="secondary", key="refresh_inbox_main"):
                 self.fetch_inbox_emails()
         
         with col3:
-            if st.button("🤖 Classify All", type="primary", key="classify_all"):
+            if st.button("🤖 Classify All", type="primary", key="classify_all_main"):
                 self.classify_inbox_emails()
         
         # Display inbox emails
@@ -389,48 +360,39 @@ class EmailClassifierApp:
         
         st.write(f"**Found {len(st.session_state.inbox_emails)} unread emails:**")
         
+        # Display each email using pure Streamlit components
         for i, email in enumerate(st.session_state.inbox_emails):
             # Check if email is already classified
             is_classified = any(c.get('email_id') == email['id'] for c in st.session_state.classifications)
             classification = next((c for c in st.session_state.classifications if c.get('email_id') == email['id']), None)
             
-            email_class = "classified-email" if is_classified else "inbox-email"
-            
-            # Create safe key for button
-            safe_key = f"classify_{i}_{email['id'][:10]}"
-            
-            st.markdown(f"""
-            <div class="email-card {email_class}">
-                <div style="display: flex; justify-content: space-between; align-items: start;">
-                    <div style="flex: 1;">
-                        <strong>{email['subject']}</strong>
-                        <div style="font-size: 0.9em; color: #666; margin-top: 0.25rem;">
-                            From: {email['from']} • {email['date']}
-                        </div>
-                    </div>
-                    <div>
-                        {f"<span style='background: #10B981; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em;'>✅ {classification['category']}</span>" if is_classified else "<span style='background: #3B82F6; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em;'>📧 Unread</span>"}
-                    </div>
-                </div>
-                <div style="margin-top: 0.5rem; font-size: 0.9em; color: #666;">
-                    {email['snippet']}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Add classify button below each email (using safe key)
-            col1, col2 = st.columns([3, 1])
-            with col2:
-                if not is_classified:
-                    if st.button(f"Classify", key=safe_key, type="secondary"):
-                        result = self.instant_classifier.classify_email(email)
-                        st.session_state.classifications.append(result)
-                        st.success(f"✅ Classified as: {result['category']}")
-                        st.rerun()
-                else:
-                    st.info(f"✓ {classification['priority']} priority")
-            
-            st.markdown("---")
+            # Create a container for each email
+            with st.container():
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    # Email subject and sender
+                    st.write(f"**{email['subject']}**")
+                    st.write(f"From: {email['from']} • {email['date']}")
+                    
+                    # Email snippet
+                    st.write(f"_{email['snippet']}_")
+                
+                with col2:
+                    # Classification status
+                    if is_classified:
+                        st.success(f"✅ {classification['category']}")
+                        st.write(f"Priority: {classification['priority']}")
+                    else:
+                        st.info("📧 Unread")
+                        # Classify button for this specific email
+                        if st.button(f"Classify", key=f"classify_{i}"):
+                            result = self.instant_classifier.classify_email(email)
+                            st.session_state.classifications.append(result)
+                            st.success(f"✅ Classified as: {result['category']}")
+                            st.rerun()
+                
+                st.markdown("---")
     
     def render_classify_tab(self):
         """Render manual classification tab"""
@@ -544,39 +506,28 @@ Customer""",
             self.display_email_card(result)
     
     def display_email_card(self, result):
-        """Display email classification card"""
-        priority_colors = {
-            "High": "#FFEBEE",
-            "Medium": "#FFF3E0", 
-            "Low": "#E8F5E8"
-        }
-        
-        st.markdown(f"""
-        <div class="email-card">
-            <div style="display: flex; justify-content: space-between; align-items: start;">
-                <div style="flex: 1;">
-                    <strong>{result['subject']}</strong>
-                    <div style="font-size: 0.9em; color: #666; margin-top: 0.25rem;">
-                        From: {result.get('from', 'Unknown')} • ⚡ Instant
-                    </div>
-                </div>
-                <span style="background: {priority_colors.get(result['priority'], '#F5F5F5')}; 
-                            padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.8em; 
-                            font-weight: bold; border: 1px solid #E5E7EB;">
-                    {result['priority']}
-                </span>
-            </div>
-            <div style="margin-top: 0.5rem; font-size: 0.9em;">
-                <strong>Category:</strong> {result['category']} • 
-                <strong>Sentiment:</strong> {result.get('sentiment', 'N/A')} •
-                <strong>Confidence:</strong> {result['confidence']:.1%}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        """Display email classification card using pure Streamlit"""
+        with st.container():
+            col1, col2 = st.columns([4, 1])
+            
+            with col1:
+                st.write(f"**{result['subject']}**")
+                st.write(f"From: {result.get('from', 'Unknown')} • ⚡ Instant")
+                st.write(f"Category: {result['category']} • Priority: {result['priority']} • Confidence: {result['confidence']:.1%}")
+            
+            with col2:
+                priority_color = {
+                    "High": "red", 
+                    "Medium": "orange", 
+                    "Low": "green"
+                }
+                st.write(f"**{result['priority']}**")
+            
+            st.markdown("---")
     
     def run(self):
         """Main application runner"""
-        st.markdown('<h1 class="main-header">🤖 AI Email Classifier</h1>', unsafe_allow_html=True)
+        st.title("🤖 AI Email Classifier")
         
         # Render sidebar
         self.render_sidebar()
