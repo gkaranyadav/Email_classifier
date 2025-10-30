@@ -1,4 +1,4 @@
-# app.py - Complete Email Classifier App with Instant Processing
+# app.py - Complete Email Classifier with Real Gmail Inbox
 import streamlit as st
 import requests
 import json
@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import time
+import base64
 
 # Page configuration
 st.set_page_config(
@@ -24,12 +25,6 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .success-box {
-        background-color: #D1FAE5;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #10B981;
-    }
     .email-card {
         border: 1px solid #E5E7EB;
         border-radius: 8px;
@@ -38,19 +33,129 @@ st.markdown("""
         background: white;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    .instant-badge {
-        background: #10B981;
+    .inbox-email {
+        border-left: 4px solid #3B82F6;
+    }
+    .classified-email {
+        border-left: 4px solid #10B981;
+    }
+    .refresh-btn {
+        background: #3B82F6;
         color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.7em;
-        margin-left: 8px;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 6px;
+        cursor: pointer;
     }
 </style>
 """, unsafe_allow_html=True)
 
+class GmailInbox:
+    """Class to fetch real emails from Gmail inbox"""
+    
+    def __init__(self, access_token):
+        self.access_token = access_token
+        self.base_url = "https://gmail.googleapis.com/gmail/v1/users/me"
+    
+    def fetch_unread_emails(self, max_results=10):
+        """Fetch unread emails from Gmail inbox"""
+        if not self.access_token:
+            return []
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Fetch unread messages
+            response = requests.get(
+                f"{self.base_url}/messages",
+                params={
+                    "labelIds": "INBOX",
+                    "q": "is:unread",
+                    "maxResults": max_results
+                },
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                st.error(f"❌ Failed to fetch emails: {response.status_code}")
+                return []
+            
+            messages_data = response.json()
+            messages = messages_data.get('messages', [])
+            
+            emails = []
+            for msg in messages:
+                try:
+                    # Get full message details
+                    msg_response = requests.get(
+                        f"{self.base_url}/messages/{msg['id']}",
+                        params={"format": "full"},
+                        headers=headers,
+                        timeout=30
+                    )
+                    
+                    if msg_response.status_code == 200:
+                        email_data = self._parse_email(msg_response.json())
+                        if email_data:
+                            emails.append(email_data)
+                except Exception as e:
+                    continue
+            
+            return emails
+            
+        except Exception as e:
+            st.error(f"❌ Error fetching emails: {str(e)}")
+            return []
+    
+    def _parse_email(self, message_data):
+        """Parse email data from Gmail API response"""
+        try:
+            headers = message_data.get('payload', {}).get('headers', [])
+            
+            # Extract email headers
+            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
+            date = next((h['value'] for h in headers if h['name'] == 'Date'), '')
+            
+            # Extract email body
+            body = self._extract_body(message_data.get('payload', {}))
+            snippet = message_data.get('snippet', '')[:200]
+            
+            return {
+                'id': message_data['id'],
+                'from': sender,
+                'subject': subject,
+                'body': body or snippet,
+                'snippet': snippet,
+                'date': date,
+                'is_unread': True,
+                'raw_data': message_data  # Keep raw data for processing
+            }
+        except:
+            return None
+    
+    def _extract_body(self, payload):
+        """Extract email body from payload"""
+        try:
+            if 'parts' in payload:
+                for part in payload['parts']:
+                    if part.get('mimeType') == 'text/plain':
+                        if 'data' in part.get('body', {}):
+                            data = part['body']['data']
+                            return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            elif 'body' in payload and 'data' in payload['body']:
+                data = payload['body']['data']
+                return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            return ""
+        except:
+            return ""
+
 class InstantClassifier:
-    """Instant email classification without Databricks"""
+    """Instant email classification"""
     
     def classify_email(self, email_data: dict):
         """Instant classification with rules"""
@@ -59,36 +164,42 @@ class InstantClassifier:
         full_text = (subject + " " + body).lower()
         
         # Enhanced pattern matching
-        if any(word in full_text for word in ['damaged', 'not working', 'refund', 'broken', 'issue', 'problem', 'frustrated']):
+        if any(word in full_text for word in ['damaged', 'not working', 'refund', 'broken', 'issue', 'problem', 'frustrated', 'angry', 'terrible']):
             category = "Complaint"
             priority = "High"
             sentiment = "Negative"
             confidence = 0.95
-            reasoning = "Product issue and refund request detected"
-        elif any(word in full_text for word in ['thank', 'great', 'good', 'excellent', 'awesome', 'amazing', 'love']):
+            reasoning = "Customer expressed frustration with product/service issue"
+        elif any(word in full_text for word in ['thank', 'great', 'good', 'excellent', 'awesome', 'amazing', 'love', 'perfect']):
             category = "Feedback"
             priority = "Low" 
             sentiment = "Positive"
             confidence = 0.88
-            reasoning = "Positive feedback detected"
-        elif any(word in full_text for word in ['hello', 'hi', 'help', 'information', 'question', 'support']):
+            reasoning = "Positive feedback and appreciation detected"
+        elif any(word in full_text for word in ['hello', 'hi', 'help', 'information', 'question', 'support', 'query']):
             category = "Service Inquiry"
             priority = "Medium"
             sentiment = "Neutral"
             confidence = 0.85
-            reasoning = "General inquiry detected"
-        elif any(word in full_text for word in ['security', 'login', 'password', 'hack', 'suspicious']):
+            reasoning = "General service inquiry or question"
+        elif any(word in full_text for word in ['security', 'login', 'password', 'hack', 'suspicious', 'unauthorized']):
             category = "Security Alert"
             priority = "High"
             sentiment = "Urgent"
             confidence = 0.92
             reasoning = "Security-related content detected"
-        elif any(word in full_text for word in ['order', 'shipping', 'delivery', 'tracking']):
+        elif any(word in full_text for word in ['order', 'shipping', 'delivery', 'tracking', 'purchase', 'buy']):
             category = "Order Issue"
             priority = "Medium"
             sentiment = "Neutral"
             confidence = 0.87
-            reasoning = "Order-related inquiry detected"
+            reasoning = "Order or purchase-related inquiry"
+        elif any(word in full_text for word in ['bill', 'payment', 'invoice', 'charge', 'billing']):
+            category = "Billing Issue"
+            priority = "High"
+            sentiment = "Negative"
+            confidence = 0.90
+            reasoning = "Billing or payment-related issue"
         else:
             category = "Other"
             priority = "Low"
@@ -111,7 +222,9 @@ class InstantClassifier:
             'body_preview': body[:100] + '...' if len(body) > 100 else body,
             'ai_reasoning': reasoning,
             'key_issues': ['Instant pattern analysis'],
-            'model_used': 'Instant Classifier ⚡'
+            'model_used': 'Instant Classifier ⚡',
+            'email_id': email_data.get('id', ''),
+            'original_date': email_data.get('date', '')
         }
     
     def _generate_reply(self, category: str, subject: str, sentiment: str, content: str):
@@ -147,32 +260,10 @@ Thank you for your inquiry: "{subject}".
 
 We've received your message and our support team will get back to you within 1-2 business hours with the information you need.
 
-In the meantime, feel free to browse our help center at [website]/help for quick answers to common questions.
+In the meantime, feel free to browse our help center for quick answers to common questions.
 
 Best regards,
-Customer Support Team""",
-
-            "Security Alert": f"""Dear User,
-
-Thank you for bringing this to our attention regarding: "{subject}".
-
-We take security very seriously. Our security team has been notified and will review this matter promptly.
-
-If this is regarding your account with us, please contact our security team directly at security@company.com for immediate assistance.
-
-Stay secure,
-Security Team""",
-
-            "Order Issue": f"""Dear Customer,
-
-Thank you for your message about: "{subject}".
-
-We're looking into your order inquiry and will provide you with an update within 24 hours. Most order-related issues can be resolved quickly once we have your order details.
-
-Please reply with your order number for faster assistance.
-
-Best regards,
-Order Support Team"""
+Customer Support Team"""
         }
         
         return base_replies.get(category, f"""Dear Customer,
@@ -181,34 +272,11 @@ Thank you for your message: "{subject}".
 
 We have received your inquiry and our team will review it shortly. We appreciate your patience and will respond as soon as possible.
 
-If this is urgent, please reply with "URGENT" in the subject line.
-
 Best regards,
 Customer Support Team""")
 
-class DatabricksClient:
-    def __init__(self):
-        self.databricks_host = st.secrets.get("DATABRICKS_HOST")
-        self.databricks_token = st.secrets.get("DATABRICKS_TOKEN")
-        self.deepseek_api_key = st.secrets.get("DEEPSEEK_API_KEY")
-        self.job_id = st.secrets.get("DATABRICKS_JOB_ID")
-    
-    def test_connection(self):
-        """Test Databricks connection"""
-        try:
-            headers = {"Authorization": f"Bearer {self.databricks_token}"}
-            response = requests.get(
-                f"{self.databricks_host}/api/2.0/clusters/list",
-                headers=headers,
-                timeout=10
-            )
-            return response.status_code == 200
-        except:
-            return False
-
 class EmailClassifierApp:
     def __init__(self):
-        self.databricks_client = DatabricksClient()
         self.instant_classifier = InstantClassifier()
         self.setup_session_state()
     
@@ -218,28 +286,15 @@ class EmailClassifierApp:
             st.session_state.classifications = []
         if 'gmail_token' not in st.session_state:
             st.session_state.gmail_token = ""
-        if 'processing' not in st.session_state:
-            st.session_state.processing = False
-        if 'use_instant' not in st.session_state:
-            st.session_state.use_instant = True
+        if 'inbox_emails' not in st.session_state:
+            st.session_state.inbox_emails = []
+        if 'last_refresh' not in st.session_state:
+            st.session_state.last_refresh = None
     
     def render_sidebar(self):
         """Render sidebar controls"""
         with st.sidebar:
             st.title("🔐 Configuration")
-            
-            # Processing Mode
-            st.subheader("⚡ Processing Mode")
-            st.session_state.use_instant = st.toggle(
-                "Use Instant Processing", 
-                value=True,
-                help="Instant processing works immediately. Databricks uses AI but takes longer."
-            )
-            
-            if st.session_state.use_instant:
-                st.success("⚡ Instant Mode: Results in 1 second")
-            else:
-                st.info("🤖 AI Mode: Results in 2-5 minutes")
             
             # Gmail Token Input
             st.subheader("Gmail Connection")
@@ -254,69 +309,143 @@ class EmailClassifierApp:
             if gmail_token != st.session_state.gmail_token:
                 st.session_state.gmail_token = gmail_token
             
-            # Test Connections
-            st.subheader("🔧 Connection Status")
-            col1, col2 = st.columns(2)
+            # Refresh Inbox Button
+            st.subheader("📥 Gmail Inbox")
+            if st.button("🔄 Refresh Inbox", type="primary", use_container_width=True):
+                if st.session_state.gmail_token:
+                    self.fetch_inbox_emails()
+                else:
+                    st.error("Please enter Gmail token first")
             
-            with col1:
-                if st.button("Test Databricks"):
-                    if self.databricks_client.test_connection():
-                        st.success("✅ Connected")
-                    else:
-                        st.error("❌ Failed")
-            
-            with col2:
-                if st.button("Test Gmail"):
-                    if st.session_state.gmail_token:
-                        try:
-                            headers = {
-                                "Authorization": f"Bearer {st.session_state.gmail_token}",
-                                "Content-Type": "application/json"
-                            }
-                            response = requests.get(
-                                "https://gmail.googleapis.com/gmail/v1/users/me/labels",
-                                headers=headers,
-                                timeout=10
-                            )
-                            if response.status_code == 200:
-                                st.success("✅ Gmail OK")
-                            else:
-                                st.error("❌ Gmail Failed")
-                        except:
-                            st.error("❌ Gmail Failed")
-                    else:
-                        st.warning("Enter token first")
+            # Auto-refresh option
+            auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
+            if auto_refresh:
+                st.info("Next refresh in 30 seconds...")
+                time.sleep(30)
+                st.rerun()
             
             # Statistics
             st.subheader("📈 Statistics")
-            st.write(f"Classifications: {len(st.session_state.classifications)}")
-            if st.session_state.classifications:
-                df = pd.DataFrame(st.session_state.classifications)
-                high_priority = len(df[df['priority'] == 'High'])
-                st.write(f"High Priority: {high_priority}")
-                
-                # Show processing mode stats
-                instant_count = len([c for c in st.session_state.classifications if 'Instant' in c.get('model_used', '')])
-                ai_count = len(st.session_state.classifications) - instant_count
-                st.write(f"Instant: {instant_count}, AI: {ai_count}")
+            st.write(f"Unread Emails: {len(st.session_state.inbox_emails)}")
+            st.write(f"Classified: {len(st.session_state.classifications)}")
+            
+            if st.session_state.last_refresh:
+                st.write(f"Last refresh: {st.session_state.last_refresh}")
     
-    def process_instant_classification(self, email_data: dict):
-        """Process email instantly"""
+    def fetch_inbox_emails(self):
+        """Fetch emails from Gmail inbox"""
         try:
-            result = self.instant_classifier.classify_email(email_data)
-            st.session_state.classifications.append(result)
-            return result
+            with st.spinner("📥 Fetching emails from Gmail..."):
+                gmail_inbox = GmailInbox(st.session_state.gmail_token)
+                emails = gmail_inbox.fetch_unread_emails(10)
+                
+                st.session_state.inbox_emails = emails
+                st.session_state.last_refresh = datetime.now().strftime("%H:%M:%S")
+                
+                if emails:
+                    st.success(f"✅ Found {len(emails)} unread emails!")
+                else:
+                    st.info("📭 No unread emails found")
+                    
         except Exception as e:
-            st.error(f"Instant classification failed: {str(e)}")
-            return None
+            st.error(f"❌ Failed to fetch emails: {str(e)}")
     
-    def render_email_tab(self):
-        """Render email classification tab"""
-        st.header("📧 Email Classification")
+    def classify_inbox_emails(self):
+        """Classify all unread inbox emails"""
+        if not st.session_state.inbox_emails:
+            st.warning("No emails to classify. Refresh inbox first.")
+            return
         
-        # Manual classification
-        st.subheader("Manual Classification")
-        st.info("⚡ Instant processing works immediately. No waiting!")
+        try:
+            with st.spinner(f"🤖 Classifying {len(st.session_state.inbox_emails)} emails..."):
+                new_classifications = 0
+                
+                for email in st.session_state.inbox_emails:
+                    # Check if email already classified
+                    if not any(c.get('email_id') == email['id'] for c in st.session_state.classifications):
+                        result = self.instant_classifier.classify_email(email)
+                        st.session_state.classifications.append(result)
+                        new_classifications += 1
+                
+                if new_classifications > 0:
+                    st.success(f"✅ Classified {new_classifications} new emails!")
+                else:
+                    st.info("📝 All emails already classified")
+                    
+        except Exception as e:
+            st.error(f"❌ Classification failed: {str(e)}")
+    
+    def render_inbox_tab(self):
+        """Render Gmail inbox tab"""
+        st.header("📥 Gmail Inbox")
+        
+        if not st.session_state.gmail_token:
+            st.info("👆 Enter your Gmail token in the sidebar to access your inbox")
+            return
+        
+        # Inbox controls
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            st.subheader("Unread Emails")
+        
+        with col2:
+            if st.button("🔄 Refresh", type="secondary"):
+                self.fetch_inbox_emails()
+        
+        with col3:
+            if st.button("🤖 Classify All", type="primary"):
+                self.classify_inbox_emails()
+        
+        # Display inbox emails
+        if not st.session_state.inbox_emails:
+            st.info("📭 No unread emails found. Click 'Refresh Inbox' to check.")
+            return
+        
+        st.write(f"**Found {len(st.session_state.inbox_emails)} unread emails:**")
+        
+        for i, email in enumerate(st.session_state.inbox_emails):
+            # Check if email is already classified
+            is_classified = any(c.get('email_id') == email['id'] for c in st.session_state.classifications)
+            classification = next((c for c in st.session_state.classifications if c.get('email_id') == email['id']), None)
+            
+            email_class = "classified-email" if is_classified else "inbox-email"
+            
+            st.markdown(f"""
+            <div class="email-card {email_class}">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div style="flex: 1;">
+                        <strong>{email['subject']}</strong>
+                        <div style="font-size: 0.9em; color: #666; margin-top: 0.25rem;">
+                            From: {email['from']} • {email['date']}
+                        </div>
+                    </div>
+                    <div>
+                        {f"<span style='background: #10B981; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em;'>✅ {classification['category']}</span>" if is_classified else "<span style='background: #3B82F6; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8em;'>📧 Unread</span>"}
+                    </div>
+                </div>
+                <div style="margin-top: 0.5rem; font-size: 0.9em; color: #666;">
+                    {email['snippet']}
+                </div>
+                <div style="margin-top: 0.5rem;">
+                    {f"<span style='font-size: 0.8em; color: #10B981;'>✓ Classified as {classification['priority']} priority</span>" if is_classified else st.button(f"Classify Email {i+1}", key=f"classify_{i}", type="secondary")}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Handle classify button click
+            if f"classify_{i}" in st.session_state and st.session_state[f"classify_{i}"]:
+                result = self.instant_classifier.classify_email(email)
+                st.session_state.classifications.append(result)
+                st.success(f"✅ Classified: {result['category']}")
+                st.rerun()
+    
+    def render_classify_tab(self):
+        """Render manual classification tab"""
+        st.header("📧 Manual Classification")
+        
+        # Manual classification form
+        st.subheader("Classify Custom Email")
         
         col1, col2 = st.columns([1, 1])
         
@@ -333,7 +462,7 @@ class EmailClassifierApp:
                                     height=150,
                                     value="""Hello,
 
-I'm writing about my recent order #12345. The product arrived damaged and doesn't work properly. The packaging was torn and the item appears to be broken.
+I'm writing about my recent order #12345. The product arrived damaged and doesn't work properly.
 
 I would like to request a refund or replacement as soon as possible.
 
@@ -341,61 +470,86 @@ Thank you,
 Customer""",
                                     placeholder="Paste email content here...")
         
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            if st.button("⚡ Classify Instantly", type="primary", use_container_width=True):
-                if subject and email_body:
-                    with st.spinner("⚡ Analyzing email instantly..."):
-                        email_data = {
-                            'subject': subject,
-                            'from': sender or 'customer@example.com',
-                            'body': email_body
-                        }
-                        result = self.process_instant_classification(email_data)
-                        if result:
-                            self.display_classification_result(result)
-                else:
-                    st.warning("Please enter subject and email content")
-        
-        with col2:
-            if st.button("🤖 Classify with AI", type="secondary", use_container_width=True, disabled=True):
-                st.info("AI mode coming soon...")
-        
-        # Display recent classifications
-        if st.session_state.classifications:
-            st.subheader("Recent Classifications")
-            for result in reversed(st.session_state.classifications[-5:]):
-                self.display_email_card(result)
+        if st.button("⚡ Classify Instantly", type="primary", use_container_width=True):
+            if subject and email_body:
+                with st.spinner("⚡ Analyzing email instantly..."):
+                    email_data = {
+                        'subject': subject,
+                        'from': sender or 'customer@example.com',
+                        'body': email_body
+                    }
+                    result = self.instant_classifier.classify_email(email_data)
+                    st.session_state.classifications.append(result)
+                    self.display_classification_result(result)
+            else:
+                st.warning("Please enter subject and email content")
     
     def display_classification_result(self, result):
         """Display classification result"""
         with st.container():
             st.markdown("---")
             
-            # Show processing mode badge
-            mode_badge = "⚡ INSTANT" if "Instant" in result.get('model_used', '') else "🤖 AI"
-            st.write(f"**Processing Mode:** {mode_badge}")
-            
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric("Category", result['category'])
             with col2:
-                priority_color = {"High": "red", "Medium": "orange", "Low": "green"}
                 st.metric("Priority", result['priority'])
             with col3:
                 st.metric("Confidence", f"{result['confidence']:.1%}")
-            
-            # Reasoning
-            with st.expander("🤔 AI Reasoning", expanded=False):
-                st.write(result.get('ai_reasoning', 'No reasoning provided'))
             
             # AI Response
             with st.expander("📋 Suggested Response", expanded=True):
                 st.write(result['reply'])
             
             st.markdown("---")
+    
+    def render_analytics_tab(self):
+        """Render analytics dashboard"""
+        st.header("📊 Analytics Dashboard")
+        
+        if not st.session_state.classifications:
+            st.info("No data available. Classify some emails first.")
+            return
+        
+        df = pd.DataFrame(st.session_state.classifications)
+        
+        # Summary cards
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Classified", len(df))
+        with col2:
+            high_priority = len(df[df['priority'] == 'High'])
+            st.metric("High Priority", high_priority)
+        with col3:
+            categories = df['category'].nunique()
+            st.metric("Categories", categories)
+        with col4:
+            st.metric("Success Rate", "100%")
+        
+        # Charts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Email Categories")
+            if 'category' in df.columns:
+                category_counts = df['category'].value_counts()
+                fig = px.pie(values=category_counts.values, names=category_counts.index)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("Priority Distribution")
+            if 'priority' in df.columns:
+                priority_counts = df['priority'].value_counts()
+                fig = px.bar(x=priority_counts.index, y=priority_counts.values,
+                           labels={'x': 'Priority', 'y': 'Count'})
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Recent classifications
+        st.subheader("Recent Classifications")
+        for result in reversed(st.session_state.classifications[-5:]):
+            self.display_email_card(result)
     
     def display_email_card(self, result):
         """Display email classification card"""
@@ -405,15 +559,13 @@ Customer""",
             "Low": "#E8F5E8"
         }
         
-        mode_badge = "⚡" if "Instant" in result.get('model_used', '') else "🤖"
-        
         st.markdown(f"""
         <div class="email-card">
             <div style="display: flex; justify-content: space-between; align-items: start;">
                 <div style="flex: 1;">
                     <strong>{result['subject']}</strong>
                     <div style="font-size: 0.9em; color: #666; margin-top: 0.25rem;">
-                        From: {result.get('from', 'Unknown')} • {mode_badge} {result.get('model_used', '')}
+                        From: {result.get('from', 'Unknown')} • ⚡ Instant
                     </div>
                 </div>
                 <span style="background: {priority_colors.get(result['priority'], '#F5F5F5')}; 
@@ -430,72 +582,6 @@ Customer""",
         </div>
         """, unsafe_allow_html=True)
     
-    def render_analytics_tab(self):
-        """Render analytics dashboard"""
-        st.header("📊 Analytics Dashboard")
-        
-        if not st.session_state.classifications:
-            st.info("No data available. Classify some emails first.")
-            return
-        
-        df = pd.DataFrame(st.session_state.classifications)
-        
-        # Summary cards
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Emails", len(df))
-        with col2:
-            high_priority = len(df[df['priority'] == 'High'])
-            st.metric("High Priority", high_priority)
-        with col3:
-            categories = df['category'].nunique()
-            st.metric("Categories", categories)
-        with col4:
-            instant_count = len([c for c in st.session_state.classifications if 'Instant' in c.get('model_used', '')])
-            st.metric("Instant Processed", instant_count)
-        
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Email Categories")
-            if 'category' in df.columns:
-                category_counts = df['category'].value_counts()
-                fig = px.pie(values=category_counts.values, names=category_counts.index, 
-                           title="Distribution of Email Categories")
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.subheader("Priority Distribution")
-            if 'priority' in df.columns:
-                priority_counts = df['priority'].value_counts()
-                fig = px.bar(x=priority_counts.index, y=priority_counts.values,
-                           labels={'x': 'Priority', 'y': 'Count'},
-                           title="Email Priority Levels")
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Processing Mode Chart
-        st.subheader("Processing Mode")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            mode_data = {
-                'Mode': ['Instant ⚡', 'AI 🤖'],
-                'Count': [
-                    len([c for c in st.session_state.classifications if 'Instant' in c.get('model_used', '')]),
-                    len([c for c in st.session_state.classifications if 'AI' in c.get('model_used', '')])
-                ]
-            }
-            mode_df = pd.DataFrame(mode_data)
-            fig = px.pie(mode_df, values='Count', names='Mode', title="Processing Mode Usage")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Response Time Comparison
-            st.metric("Average Processing Time", "< 1 second")
-            st.metric("Success Rate", "100%")
-    
     def run(self):
         """Main application runner"""
         st.markdown('<h1 class="main-header">🤖 AI Email Classifier</h1>', unsafe_allow_html=True)
@@ -504,12 +590,15 @@ Customer""",
         self.render_sidebar()
         
         # Main content tabs
-        tab1, tab2 = st.tabs(["📧 Classify Emails", "📊 Analytics"])
+        tab1, tab2, tab3 = st.tabs(["📥 Gmail Inbox", "📧 Classify", "📊 Analytics"])
         
         with tab1:
-            self.render_email_tab()
+            self.render_inbox_tab()
         
         with tab2:
+            self.render_classify_tab()
+        
+        with tab3:
             self.render_analytics_tab()
 
 # Run the application
